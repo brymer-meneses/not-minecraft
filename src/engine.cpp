@@ -13,7 +13,6 @@ module;
 #include "vulkan/vulkan_enums.hpp"
 
 export module nm.engine;
-import nm.engine.vk;
 
 #ifdef NDEBUG
 static constexpr bool EnableValidationLayers = false;
@@ -44,7 +43,8 @@ class Engine {
     glfwDestroyWindow(window_);
     glfwTerminate();
 
-    DestroyDebugUtilsMessengerEXT(instance_, debug_messenger_);
+    instance_.destroyDebugUtilsMessengerEXT(debug_messenger_, nullptr,
+                                            dispatch_loader_);
     instance_.destroy();
   }
 
@@ -115,6 +115,9 @@ class Engine {
         vk::Result::eSuccess) {
       throw std::runtime_error("Failed to create a `vk::Instance`");
     }
+
+    dispatch_loader_ =
+        vk::detail::DispatchLoaderDynamic(instance_, vkGetInstanceProcAddr);
   }
 
   auto SetupDebugMessenger() -> void {
@@ -123,10 +126,9 @@ class Engine {
     }
 
     auto create_info = CreateDebugMessengerCreateInfo();
-    if (CreateDebugUtilsMessengerEXT(
-            instance_, create_info, debug_messenger_) != vk::Result::eSuccess) {
-      throw std::runtime_error("Failed to set up debug messenger.");
-    }
+
+    debug_messenger_ = instance_.createDebugUtilsMessengerEXT(
+        create_info, nullptr, dispatch_loader_);
   }
 
   auto PickPhysicalDevice() -> void {
@@ -158,7 +160,6 @@ class Engine {
 
     std::multimap<int, vk::PhysicalDevice> candidates;
     auto physical_devices = instance_.enumeratePhysicalDevices();
-    vk::PhysicalDevice best_candidate;
 
     if (physical_devices.size() == 0) {
       throw std::runtime_error("Failed to find a device with Vulkan support.");
@@ -169,11 +170,7 @@ class Engine {
       candidates.insert({score, device});
     }
 
-    if (auto [score, device] = *candidates.begin(); score > 0) {
-      best_candidate = device;
-    } else {
-      throw std::runtime_error("Failed to find a suitable GPU.");
-    }
+    auto [_, best_candidate] = *candidates.begin();
   }
 
   static auto CheckValidationSupport() -> bool {
@@ -234,10 +231,40 @@ class Engine {
     return required_extensions;
   }
 
+  static VKAPI_ATTR VkBool32 VKAPI_CALL
+  DebugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
+                vk::DebugUtilsMessageTypeFlagsEXT message_type,
+                const vk::DebugUtilsMessengerCallbackDataEXT* callback_data,
+                void* user_data) {
+    std::println(std::cerr, "Validation Layer: {}", callback_data->pMessage);
+    return VK_FALSE;
+  }
+
+  static auto CreateDebugMessengerCreateInfo()
+      -> vk::DebugUtilsMessengerCreateInfoEXT {
+    vk::DebugUtilsMessengerCreateInfoEXT create_info;
+
+    create_info.messageSeverity =
+        vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+        vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+        vk::DebugUtilsMessageSeverityFlagBitsEXT::eError;
+
+    create_info.messageType =
+        vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
+        vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+        vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
+
+    create_info.pfnUserCallback = DebugCallback;
+    create_info.pUserData = nullptr;
+
+    return create_info;
+  }
+
  private:
   Config config_;
   vk::Instance instance_;
   vk::DebugUtilsMessengerEXT debug_messenger_;
+  vk::detail::DispatchLoaderDynamic dispatch_loader_;
 
   // I know I can use a `std::unique_ptr` but the I don't really want to create
   // a custom deleter :<
