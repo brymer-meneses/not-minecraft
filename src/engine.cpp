@@ -4,7 +4,7 @@ module;
 #include <cstdint>
 #include <format>
 #include <iostream>
-#include <map>
+#include <optional>
 #include <print>
 #include <ranges>
 
@@ -45,6 +45,7 @@ class Engine {
 
     instance_.destroyDebugUtilsMessengerEXT(debug_messenger_, nullptr,
                                             dispatch_loader_);
+    device_.destroy();
     instance_.destroy();
   }
 
@@ -73,6 +74,7 @@ class Engine {
     CreateInstance();
     SetupDebugMessenger();
     PickPhysicalDevice();
+    CreateLogicalDevice();
   }
 
   auto CreateInstance() -> void {
@@ -131,47 +133,72 @@ class Engine {
         create_info, nullptr, dispatch_loader_);
   }
 
-  auto PickPhysicalDevice() -> void {
-    static auto rate_device = [](vk::PhysicalDevice device) {
-      auto score = 0;
-      auto properties = device.getProperties();
-      auto features = device.getFeatures();
-      switch (properties.deviceType) {
-        case vk::PhysicalDeviceType::eDiscreteGpu:
-          score += 1000;
-          break;
-        case vk::PhysicalDeviceType::eIntegratedGpu:
-          score += 500;
-          break;
-        case vk::PhysicalDeviceType::eVirtualGpu:
-          score += 200;
-          break;
-        case vk::PhysicalDeviceType::eCpu:
-          score += 100;
-          break;
-        case vk::PhysicalDeviceType::eOther:
-          score += 10;
-          break;
-      }
+  struct QueueFamilyIndicies {
+    std::optional<uint32_t> graphics_family;
 
-      score += properties.limits.maxImageDimension2D;
-      return score;
+    auto IsComplete() const -> bool { return graphics_family.has_value(); }
+  };
+
+  auto PickPhysicalDevice() -> void {
+    static auto is_device_suitable =
+        [](const vk::PhysicalDevice& device) -> bool {
+      auto indices = FindQueueFamilies(device);
+      return indices.graphics_family.has_value();
     };
 
-    std::multimap<int, vk::PhysicalDevice> candidates;
-    auto physical_devices = instance_.enumeratePhysicalDevices();
-
+    const auto physical_devices = instance_.enumeratePhysicalDevices();
     if (physical_devices.size() == 0) {
       throw std::runtime_error("Failed to find a device with Vulkan support.");
     }
 
-    for (const auto& device : physical_devices) {
-      auto score = rate_device(device);
-      candidates.insert({score, device});
+    for (const auto& physical_device : physical_devices) {
+      if (is_device_suitable(physical_device)) {
+        physical_device_ = physical_device;
+        break;
+      }
+    }
+  }
+
+  auto CreateLogicalDevice() -> void {
+    const auto indices = FindQueueFamilies(physical_device_);
+    vk::DeviceQueueCreateInfo queue_create_info;
+    queue_create_info.queueFamilyIndex = *indices.graphics_family;
+    queue_create_info.queueCount = 1;
+    auto queue_priority = 1.0f;
+    queue_create_info.pQueuePriorities = &queue_priority;
+
+    vk::PhysicalDeviceFeatures device_features;
+    vk::DeviceCreateInfo device_create_info{};
+    device_create_info.pQueueCreateInfos = &queue_create_info;
+    device_create_info.queueCreateInfoCount = 1;
+    device_create_info.pEnabledFeatures = &device_features;
+    device_create_info.enabledExtensionCount = 0;
+
+    if (physical_device_.createDevice(&device_create_info, nullptr, &device_) !=
+        vk::Result::eSuccess) {
+      throw std::runtime_error("Failed to create logical device.");
     }
 
-    auto [_, best_candidate] = *candidates.begin();
+    graphics_queue_ =
+        device_.getQueue(*indices.graphics_family, /*queueIndex=*/0);
   }
+
+  static auto FindQueueFamilies(const vk::PhysicalDevice& device)
+      -> QueueFamilyIndicies {
+    QueueFamilyIndicies indices;
+    auto queue_families = device.getQueueFamilyProperties();
+    auto i = 0;
+    for (const auto& queue_family : queue_families) {
+      if (queue_family.queueFlags & vk::QueueFlagBits::eGraphics) {
+        indices.graphics_family = i;
+      }
+      if (indices.IsComplete()) {
+        break;
+      }
+      i += 1;
+    }
+    return indices;
+  };
 
   static auto CheckValidationSupport() -> bool {
     for (const auto& required_layer : ValidationLayers) {
@@ -265,6 +292,9 @@ class Engine {
   vk::Instance instance_;
   vk::DebugUtilsMessengerEXT debug_messenger_;
   vk::detail::DispatchLoaderDynamic dispatch_loader_;
+  vk::PhysicalDevice physical_device_;
+  vk::Device device_;
+  vk::Queue graphics_queue_;
 
   // I know I can use a `std::unique_ptr` but the I don't really want to create
   // a custom deleter :<
