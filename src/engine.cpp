@@ -12,7 +12,7 @@ module;
 #include "vulkan/vulkan_enums.hpp"
 
 export module nm.engine;
-import nm.vk;
+import nm.engine.vk;
 
 #ifdef NDEBUG
 static constexpr bool EnableValidationLayers = false;
@@ -143,26 +143,6 @@ class Engine {
     return true;
   }
 
-  static auto CreateDebugMessengerCreateInfo()
-      -> vk::DebugUtilsMessengerCreateInfoEXT {
-    vk::DebugUtilsMessengerCreateInfoEXT create_info;
-
-    create_info.messageSeverity =
-        vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
-        vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-        vk::DebugUtilsMessageSeverityFlagBitsEXT::eError;
-
-    create_info.messageType =
-        vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
-        vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-        vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
-
-    create_info.pfnUserCallback = DebugCallback;
-    create_info.pUserData = nullptr;
-
-    return create_info;
-  }
-
   // Checks the required vulkan extensions and check if they exists.
   auto GetAndValidateRequiredExtensions() const -> std::vector<const char*> {
     std::vector<const char*> required_extensions;
@@ -199,15 +179,6 @@ class Engine {
     }
 
     return required_extensions;
-  }
-
-  static VKAPI_ATTR VkBool32 VKAPI_CALL
-  DebugCallback(vk::DebugUtilsMessageSeverityFlagBitsEXT message_severity,
-                vk::DebugUtilsMessageTypeFlagsEXT message_type,
-                const vk::DebugUtilsMessengerCallbackDataEXT* callback_data,
-                void* user_data) {
-    std::println(std::cerr, "Validation Layer: {}", callback_data->pMessage);
-    return VK_FALSE;
   }
 
  private:
