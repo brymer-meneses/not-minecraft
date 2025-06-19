@@ -7,7 +7,9 @@ module;
 #include <optional>
 #include <print>
 #include <ranges>
+#include <set>
 
+#define GLFW_INCLUDE_VULKAN
 #include "GLFW/glfw3.h"
 #include "vulkan/vulkan.hpp"
 #include "vulkan/vulkan_enums.hpp"
@@ -45,6 +47,7 @@ class Engine {
 
     instance_.destroyDebugUtilsMessengerEXT(debug_messenger_, nullptr,
                                             dispatch_loader_);
+    instance_.destroySurfaceKHR(surface_);
     device_.destroy();
     instance_.destroy();
   }
@@ -73,6 +76,7 @@ class Engine {
   auto InitVulkan() -> void {
     CreateInstance();
     SetupDebugMessenger();
+    CreateSurface();
     PickPhysicalDevice();
     CreateLogicalDevice();
   }
@@ -133,15 +137,24 @@ class Engine {
         create_info, nullptr, dispatch_loader_);
   }
 
+  auto CreateSurface() -> void {
+    if (glfwCreateWindowSurface(instance_, window_, nullptr,
+                                reinterpret_cast<VkSurfaceKHR*>(&surface_))) {
+      throw std::runtime_error("Failed to create window surface.");
+    }
+  }
+
   struct QueueFamilyIndicies {
     std::optional<uint32_t> graphics_family;
+    std::optional<uint32_t> present_family;
 
-    auto IsComplete() const -> bool { return graphics_family.has_value(); }
+    auto IsComplete() const -> bool {
+      return graphics_family.has_value() and present_family.has_value();
+    }
   };
 
   auto PickPhysicalDevice() -> void {
-    static auto is_device_suitable =
-        [](const vk::PhysicalDevice& device) -> bool {
+    auto is_device_suitable = [this](const vk::PhysicalDevice& device) -> bool {
       auto indices = FindQueueFamilies(device);
       return indices.graphics_family.has_value();
     };
@@ -161,16 +174,26 @@ class Engine {
 
   auto CreateLogicalDevice() -> void {
     const auto indices = FindQueueFamilies(physical_device_);
-    vk::DeviceQueueCreateInfo queue_create_info;
-    queue_create_info.queueFamilyIndex = *indices.graphics_family;
-    queue_create_info.queueCount = 1;
+    assert(indices.IsComplete());
+
+    std::vector<vk::DeviceQueueCreateInfo> queue_create_infos;
+    std::set unique_queue_families = {*indices.graphics_family,
+                                      *indices.present_family};
+
     auto queue_priority = 1.0f;
-    queue_create_info.pQueuePriorities = &queue_priority;
+    for (const auto queue_family : unique_queue_families) {
+      vk::DeviceQueueCreateInfo queue_create_info;
+      queue_create_info.queueFamilyIndex = queue_family;
+      queue_create_info.queueCount = 1;
+      queue_create_info.pQueuePriorities = &queue_priority;
+      queue_create_infos.push_back(queue_create_info);
+    }
 
     vk::PhysicalDeviceFeatures device_features;
     vk::DeviceCreateInfo device_create_info{};
-    device_create_info.pQueueCreateInfos = &queue_create_info;
-    device_create_info.queueCreateInfoCount = 1;
+    device_create_info.queueCreateInfoCount =
+        static_cast<uint32_t>(queue_create_infos.size());
+    device_create_info.pQueueCreateInfos = queue_create_infos.data();
     device_create_info.pEnabledFeatures = &device_features;
     device_create_info.enabledExtensionCount = 0;
 
@@ -181,19 +204,25 @@ class Engine {
 
     graphics_queue_ =
         device_.getQueue(*indices.graphics_family, /*queueIndex=*/0);
+    present_queue_ =
+        device_.getQueue(*indices.present_family, /*queueIndex=*/0);
   }
 
-  static auto FindQueueFamilies(const vk::PhysicalDevice& device)
+  auto FindQueueFamilies(const vk::PhysicalDevice& device) const
       -> QueueFamilyIndicies {
     QueueFamilyIndicies indices;
     auto queue_families = device.getQueueFamilyProperties();
     auto i = 0;
     for (const auto& queue_family : queue_families) {
+      if (indices.IsComplete()) {
+        break;
+      }
+
       if (queue_family.queueFlags & vk::QueueFlagBits::eGraphics) {
         indices.graphics_family = i;
       }
-      if (indices.IsComplete()) {
-        break;
+      if (device.getSurfaceSupportKHR(i, surface_)) {
+        indices.present_family = i;
       }
       i += 1;
     }
@@ -295,6 +324,8 @@ class Engine {
   vk::PhysicalDevice physical_device_;
   vk::Device device_;
   vk::Queue graphics_queue_;
+  vk::Queue present_queue_;
+  vk::SurfaceKHR surface_;
 
   // I know I can use a `std::unique_ptr` but the I don't really want to create
   // a custom deleter :<
