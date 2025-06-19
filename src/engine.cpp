@@ -4,6 +4,7 @@ module;
 #include <cstdint>
 #include <format>
 #include <iostream>
+#include <map>
 #include <print>
 #include <ranges>
 
@@ -44,6 +45,7 @@ class Engine {
     glfwTerminate();
 
     DestroyDebugUtilsMessengerEXT(instance_, debug_messenger_);
+    instance_.destroy();
   }
 
   auto Run() -> void { MainLoop(); }
@@ -67,7 +69,11 @@ class Engine {
                                nullptr);
   }
 
-  auto InitVulkan() -> void { CreateInstance(); }
+  auto InitVulkan() -> void {
+    CreateInstance();
+    SetupDebugMessenger();
+    PickPhysicalDevice();
+  }
 
   auto CreateInstance() -> void {
     vk::ApplicationInfo app_info;
@@ -123,6 +129,53 @@ class Engine {
     }
   }
 
+  auto PickPhysicalDevice() -> void {
+    static auto rate_device = [](vk::PhysicalDevice device) {
+      auto score = 0;
+      auto properties = device.getProperties();
+      auto features = device.getFeatures();
+      switch (properties.deviceType) {
+        case vk::PhysicalDeviceType::eDiscreteGpu:
+          score += 1000;
+          break;
+        case vk::PhysicalDeviceType::eIntegratedGpu:
+          score += 500;
+          break;
+        case vk::PhysicalDeviceType::eVirtualGpu:
+          score += 200;
+          break;
+        case vk::PhysicalDeviceType::eCpu:
+          score += 100;
+          break;
+        case vk::PhysicalDeviceType::eOther:
+          score += 10;
+          break;
+      }
+
+      score += properties.limits.maxImageDimension2D;
+      return score;
+    };
+
+    std::multimap<int, vk::PhysicalDevice> candidates;
+    auto physical_devices = instance_.enumeratePhysicalDevices();
+    vk::PhysicalDevice best_candidate;
+
+    if (physical_devices.size() == 0) {
+      throw std::runtime_error("Failed to find a device with Vulkan support.");
+    }
+
+    for (const auto& device : physical_devices) {
+      auto score = rate_device(device);
+      candidates.insert({score, device});
+    }
+
+    if (auto [score, device] = *candidates.begin(); score > 0) {
+      best_candidate = device;
+    } else {
+      throw std::runtime_error("Failed to find a suitable GPU.");
+    }
+  }
+
   static auto CheckValidationSupport() -> bool {
     for (const auto& required_layer : ValidationLayers) {
       auto found = false;
@@ -144,7 +197,7 @@ class Engine {
   }
 
   // Checks the required vulkan extensions and check if they exists.
-  auto GetAndValidateRequiredExtensions() const -> std::vector<const char*> {
+  static auto GetAndValidateRequiredExtensions() -> std::vector<const char*> {
     std::vector<const char*> required_extensions;
     auto glfw_extensions_count = 0u;
     auto glfw_extensions =
