@@ -50,6 +50,10 @@ class Engine {
                                               dispatch_loader_);
     }
 
+    for (auto image_view : swap_chain_image_views_) {
+      device_.destroyImageView(image_view);
+    }
+
     device_.destroySwapchainKHR(swap_chain_);
     instance_.destroySurfaceKHR(surface_);
     device_.destroy();
@@ -290,6 +294,31 @@ class Engine {
     swap_chain_extent_ = extent;
   }
 
+  auto CreateImageViews() -> void {
+    swap_chain_image_views_.reserve(swap_chain_images_.size());
+
+    for (const auto& image : swap_chain_images_) {
+      vk::ImageViewCreateInfo create_info;
+      create_info.image = image;
+      create_info.viewType = vk::ImageViewType::e2D;
+      create_info.format = swap_chain_image_format_;
+
+      create_info.components.r = vk::ComponentSwizzle::eIdentity;
+      create_info.components.g = vk::ComponentSwizzle::eIdentity;
+      create_info.components.b = vk::ComponentSwizzle::eIdentity;
+      create_info.components.a = vk::ComponentSwizzle::eIdentity;
+
+      create_info.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+      create_info.subresourceRange.baseMipLevel = 0;
+      create_info.subresourceRange.levelCount = 1;
+      create_info.subresourceRange.baseArrayLayer = 0;
+      create_info.subresourceRange.layerCount = 0;
+
+      swap_chain_image_views_.emplace_back(
+          device_.createImageView(create_info, nullptr));
+    }
+  }
+
   static auto ChooseSwapSurfaceFormat(
       std::span<vk::SurfaceFormatKHR> available_formats)
       -> vk::SurfaceFormatKHR {
@@ -493,8 +522,9 @@ class Engine {
   vk::SurfaceKHR surface_;
   vk::SwapchainKHR swap_chain_;
   std::vector<vk::Image> swap_chain_images_;
-  vk::SurfaceFormatKHR swap_chain_image_format_;
+  vk::Format swap_chain_image_format_;
   vk::Extent2D swap_chain_extent_;
+  std::vector<vk::ImageView> swap_chain_image_views_;
 };
 
 }  // namespace nm
