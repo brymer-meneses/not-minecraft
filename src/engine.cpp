@@ -33,7 +33,7 @@ class Engine {
   struct Config {
     uint32_t width;
     uint32_t height;
-    const char* application_name;
+    std::string application_name;
   };
 
   Engine(Config config) : config_(config) {
@@ -110,7 +110,7 @@ class Engine {
 
   auto CreateInstance() -> void {
     vk::ApplicationInfo app_info;
-    app_info.pApplicationName = config_.application_name;
+    app_info.pApplicationName = config_.application_name.c_str();
     app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.pEngineName = "No Engine";
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -170,8 +170,6 @@ class Engine {
         VK_SUCCESS) {
       throw std::runtime_error("Failed to create window surface.");
     }
-
-    std::cout << "SURFACE: " << surface_ << "\n";
 
     assert(surface_ != VK_NULL_HANDLE);
   }
